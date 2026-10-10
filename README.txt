@@ -1,4 +1,6 @@
-UNTIL ZOMBIES COME ONLINE v1.0
-Upload contents to the GitHub repository root, replacing server.js and public/index.html. Render automatically deploys new commits.
-Changes: spatial grid collision, 10Hz snapshots, 30Hz simulation, in-game audio, smaller mobile joysticks, shop click fix. Enemy count multiplies by party size.
-Note: audio is procedural, not commercial BO6 samples.
+UNTIL ZOMBIES COME ONLINE v2.0 BETA
+
+Original solo.html visual design and audio retained in index.html.
+Online rooms for 1-4 players use the existing server simulation.
+Upload server.js and public/index.html to GitHub, then wait for Render Live.
+Note: Online movement uses server positions and may feel less smooth than local solo.
