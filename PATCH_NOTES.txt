@@ -1,1 +1,1 @@
-v2.3 PATCH: server-authoritative bullet impact, bullets stop at zombie/wall, fully upgraded Pistol (level 3) has explosive 82px splash and 90 base damage. Replace server.js and public/index.html. Test with two players before considering stable.
+v2.4 PATCH: Pistol explosions begin at Particle 1 (5000 EUR). Particle 1: 45 damage, radius 55 px; Particle 2: 70 damage, radius 70 px; Particle 3: 100 damage, radius 90 px. Existing gun rate upgrades apply. Replace server.js and public/index.html.

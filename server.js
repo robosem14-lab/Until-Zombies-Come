@@ -11,8 +11,9 @@ let ox=p.x+vx*36,oy=p.y+vy*36,impactX=ox+vx*650,impactY=oy+vy*650,nearest=null,b
 for(let distance=5;distance<=650;distance+=5){if(hitWall(ox+vx*distance,oy+vy*distance,2)){best=distance;impactX=ox+vx*distance;impactY=oy+vy*distance;break}}
 for(let z of room.zombies){let dx=z.x-ox,dy=z.y-oy,projection=dx*vx+dy*vy,lateral=Math.abs(dx*vy-dy*vx),radius=z.r+3;
 if(projection>=0&&lateral<radius){let contact=Math.max(0,projection-Math.sqrt(radius*radius-lateral*lateral));if(contact<best){best=contact;nearest=z;impactX=ox+vx*contact;impactY=oy+vy*contact}}}
-let explosive=p.gun===0&&p.levels[0]===3&&nearest!==null;
-if(nearest){if(explosive){let blastRadius=82,blastDamage=90;
+let pistolUpgrade=p.gun===0?p.levels[0]:0;
+let explosive=pistolUpgrade>=1&&nearest!==null;
+if(nearest){if(explosive){let blastRadius=[0,55,70,90][pistolUpgrade],blastDamage=[0,45,70,100][pistolUpgrade];
 for(let target of [...room.zombies]){let d=Math.hypot(target.x-impactX,target.y-impactY);if(d<=blastRadius+target.r){target.hp-=Math.round(blastDamage*(1-.35*Math.min(1,d/blastRadius)));if(target.hp<=0)kill(room,target,p)}}
 }else{nearest.hp-=g.damage*[1,1.15,1.3,1.5][p.levels[p.gun]];if(nearest.hp<=0)kill(room,nearest,p)}}
 for(let id of room.ids){let other=players.get(id);if(other)send(other,{type:'shot',id:p.id,x:ox,y:oy,aim:angle,level:p.levels[p.gun],gun:p.gun,endX:impactX,endY:impactY,explosive,hit:!!nearest})}
