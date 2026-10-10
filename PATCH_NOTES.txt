@@ -1,1 +1,1 @@
-v2.6: Visible expanding RED explosion ring at the actual server-confirmed bullet impact for Particle pistol levels 1/2/3. Area damage remains server-authoritative. To play online, run Node server or deploy BOTH server.js and public/index.html to Render; opening index.html as a local file does not connect to the server.
+v3.0 BETA: three online zones; shared unlocks; automatic doorway transitions; server-side separate zone zombie targeting; purchases 1000/2000 EUR. Gameplay not yet tested with 2-4 clients.

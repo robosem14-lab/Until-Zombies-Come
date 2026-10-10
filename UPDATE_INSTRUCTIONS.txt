@@ -1,3 +1,9 @@
-Until Zombies Come v2.2 FINAL candidate
+v3.0 MAP EXPANSION BETA
 
-Upload public/index.html and server.js to the same paths on GitHub, commit, wait for Render Live, Ctrl+F5. Do not delete public/solo.html. Test multiplayer movement, shooting and medkit.
+1. Replace server.js at GitHub repository root.
+2. Replace public/index.html in GitHub public folder.
+3. Commit changes and wait for Render Live.
+4. Open https://until-zombies-come.onrender.com and Ctrl+F5.
+
+ONLINE multiplayer: starting room, STORAGE (1000 EUR north), COURTYARD (2000 EUR south). Walk near gate, click purchase, then walk through. Doors unlock for whole party. Return is free.
+Solo mode is unchanged.
