@@ -1,1 +1,1 @@
-v2.4 PATCH: Pistol explosions begin at Particle 1 (5000 EUR). Particle 1: 45 damage, radius 55 px; Particle 2: 70 damage, radius 70 px; Particle 3: 100 damage, radius 90 px. Existing gun rate upgrades apply. Replace server.js and public/index.html.
+v2.6: Visible expanding RED explosion ring at the actual server-confirmed bullet impact for Particle pistol levels 1/2/3. Area damage remains server-authoritative. To play online, run Node server or deploy BOTH server.js and public/index.html to Render; opening index.html as a local file does not connect to the server.

@@ -11,11 +11,25 @@ let ox=p.x+vx*36,oy=p.y+vy*36,impactX=ox+vx*650,impactY=oy+vy*650,nearest=null,b
 for(let distance=5;distance<=650;distance+=5){if(hitWall(ox+vx*distance,oy+vy*distance,2)){best=distance;impactX=ox+vx*distance;impactY=oy+vy*distance;break}}
 for(let z of room.zombies){let dx=z.x-ox,dy=z.y-oy,projection=dx*vx+dy*vy,lateral=Math.abs(dx*vy-dy*vx),radius=z.r+3;
 if(projection>=0&&lateral<radius){let contact=Math.max(0,projection-Math.sqrt(radius*radius-lateral*lateral));if(contact<best){best=contact;nearest=z;impactX=ox+vx*contact;impactY=oy+vy*contact}}}
+// Particle upgrades turn pistol shots into explosive projectiles at ALL three levels.
+// Explosion is centered on the FIRST impact (zombie OR wall); a near miss also
+// detonates at the projectile endpoint. The server alone applies area damage.
 let pistolUpgrade=p.gun===0?p.levels[0]:0;
-let explosive=pistolUpgrade>=1&&nearest!==null;
-if(nearest){if(explosive){let blastRadius=[0,55,70,90][pistolUpgrade],blastDamage=[0,45,70,100][pistolUpgrade];
-for(let target of [...room.zombies]){let d=Math.hypot(target.x-impactX,target.y-impactY);if(d<=blastRadius+target.r){target.hp-=Math.round(blastDamage*(1-.35*Math.min(1,d/blastRadius)));if(target.hp<=0)kill(room,target,p)}}
-}else{nearest.hp-=g.damage*[1,1.15,1.3,1.5][p.levels[p.gun]];if(nearest.hp<=0)kill(room,nearest,p)}}
+let explosive=pistolUpgrade>=1;
+if(explosive){
+  const blastRadius=[0,55,70,90][pistolUpgrade];
+  const blastDamage=[0,45,70,100][pistolUpgrade];
+  for(const target of [...room.zombies]){
+    const d=Math.hypot(target.x-impactX,target.y-impactY);
+    if(d<=blastRadius+target.r){
+      target.hp-=Math.max(1,Math.round(blastDamage*(1-.35*Math.min(1,d/blastRadius))));
+      if(target.hp<=0)kill(room,target,p);
+    }
+  }
+}else if(nearest){
+  nearest.hp-=g.damage*[1,1.15,1.3,1.5][p.levels[p.gun]];
+  if(nearest.hp<=0)kill(room,nearest,p);
+}
 for(let id of room.ids){let other=players.get(id);if(other)send(other,{type:'shot',id:p.id,x:ox,y:oy,aim:angle,level:p.levels[p.gun],gun:p.gun,endX:impactX,endY:impactY,explosive,hit:!!nearest})}
 }}}if(room.remaining>0){room.spawnClock-=dt;if(room.spawnClock<=0){if(room.zombies.length<90){spawn(room);room.remaining--;}room.spawnClock=Math.max(.22,.65-room.wave*.016)}}for(let z of room.zombies){let target=null,best=Infinity;for(let p of members){if(p.hp<=0)continue;let d=Math.hypot(p.x-z.x,p.y-z.y);if(d<best){best=d;target=p}}if(!target)continue;let dx=(target.x-z.x)/(best||1),dy=(target.y-z.y)/(best||1);if(z.type==='cyan'){z.bombTimer-=dt;if(best<330&&z.bombTimer<=0){room.bombs.push({x:target.x,y:target.y,t:1.4,r:49});z.bombTimer=3+Math.random()*1.5}if(best<170){dx=-dx;dy=-dy}else if(best<240){dx=0;dy=0}}moveEntity(z,dx*z.speed*dt,dy*z.speed*dt,z.r);if(best<z.r+13&&target.inv<=0){target.hp=Math.max(0,target.hp-(z.type==='red'?22:12));target.inv=.65}}// Spatial hash: only resolve overlaps in nearby cells (not every pair on the map).
 const cells=new Map(),cellSize=45;
