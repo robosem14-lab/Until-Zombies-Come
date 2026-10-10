@@ -1,0 +1,3 @@
+Until Zombies Come v2.2 FINAL candidate
+
+Upload public/index.html and server.js to the same paths on GitHub, commit, wait for Render Live, Ctrl+F5. Do not delete public/solo.html. Test multiplayer movement, shooting and medkit.
