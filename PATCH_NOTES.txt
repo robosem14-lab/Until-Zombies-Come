@@ -1,0 +1,1 @@
+v2.3 PATCH: server-authoritative bullet impact, bullets stop at zombie/wall, fully upgraded Pistol (level 3) has explosive 82px splash and 90 base damage. Replace server.js and public/index.html. Test with two players before considering stable.
