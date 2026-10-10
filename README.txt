@@ -1,6 +1,9 @@
-UNTIL ZOMBIES COME ONLINE v2.0 BETA
+UNTIL ZOMBIES COME ONLINE v2.1 BETA
 
-Original solo.html visual design and audio retained in index.html.
-Online rooms for 1-4 players use the existing server simulation.
-Upload server.js and public/index.html to GitHub, then wait for Render Live.
-Note: Online movement uses server positions and may feel less smooth than local solo.
+Fixes:
+- Smooth client-side interpolation of players and zombies between server updates.
+- Store buttons no longer get replaced every network packet.
+- Purchases and upgrades stay in the shop, with confirmation and refreshed items.
+
+Deploy: replace server.js and public/index.html in your GitHub repository. Render redeploys automatically.
+Do not delete public/solo.html.
