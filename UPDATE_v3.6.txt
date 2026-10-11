@@ -1,0 +1,5 @@
+v3.6 ZOMBIE DIFFICULTY UPDATE
+- Zombie HP grows by an extra 14% per wave (compounding), on top of previous base wave scaling.
+- Red zombies are guaranteed periodically (at least approximately every 6 spawns) from wave 5 onward, while other unlocked types remain available.
+- Particle, gun and perk logic is unchanged.
+- Changes apply to online server and browser solo modes.
