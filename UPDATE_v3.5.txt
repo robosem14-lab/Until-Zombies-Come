@@ -1,0 +1,1 @@
+v3.5 Zombie Update: yellow speedy low-HP zombie from wave 10; purple charging tank from wave 14. Red line telegraph ~1.15s, charge hits for 50 HP. Particle mechanics unchanged. Online and index solo modes updated.
