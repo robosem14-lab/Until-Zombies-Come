@@ -1,0 +1,1 @@
+v3.12: исправлена авторизация Supabase для новых sb_secret_ ключей. Удалён некорректный заголовок Authorization: Bearer sb_secret_...; ключ передаётся только в apikey. Замените server.js на GitHub, дождитесь Live в Render. Не меняйте Supabase Environment, таблицу, клиент и механику игры.

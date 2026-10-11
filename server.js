@@ -14,7 +14,7 @@ function verifyPassword(password,stored){
 }
 async function sbRequest(method,endpoint,body){
  if(!SB_READY)throw Error('База аккаунтов не подключена. Проверь настройки Render');
- const response=await fetch(SB_URL+'/rest/v1/'+endpoint,{method,headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':'return=representation'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(8000)});
+ const response=await fetch(SB_URL+'/rest/v1/'+endpoint,{method,headers:{'apikey':SB_KEY,...(SB_KEY.startsWith('sb_secret_')?{}:{'Authorization':'Bearer '+SB_KEY}),'Content-Type':'application/json','Prefer':'return=representation'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(8000)});
  const raw=await response.text();let data;try{data=JSON.parse(raw)}catch{data=raw}
  if(!response.ok){let e=new Error('Supabase '+response.status);e.status=response.status;e.code=data?.code;throw e}
  return data;
