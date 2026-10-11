@@ -2,16 +2,28 @@ const http=require('http'),fs=require('fs'),path=require('path'),crypto=require(
 const ADMIN_SECRET=process.env.ADMIN_SECRET||'';
 function validSecret(value){if(!ADMIN_SECRET||typeof value!=='string'||value.length>256)return false;const a=crypto.createHash('sha256').update(value).digest(),b=crypto.createHash('sha256').update(ADMIN_SECRET).digest();return crypto.timingSafeEqual(a,b)}
 const PORT=process.env.PORT||3000,root=path.join(__dirname,'public');
-// Account storage: configure DATA_DIR to a persistent Render disk mount (e.g. /var/data).
-const DATA_DIR=process.env.DATA_DIR||path.join(__dirname,'data');
-const ACCOUNT_FILE=path.join(DATA_DIR,'accounts.json');
-fs.mkdirSync(DATA_DIR,{recursive:true});
-let accounts={};try{accounts=JSON.parse(fs.readFileSync(ACCOUNT_FILE,'utf8'))}catch(e){if(e.code!=='ENOENT')console.error('Account database read failed:',e.message)}
-function saveAccounts(){const tmp=ACCOUNT_FILE+'.tmp';fs.writeFileSync(tmp,JSON.stringify(accounts));fs.renameSync(tmp,ACCOUNT_FILE)}
+// Permanent accounts in Supabase. Secret key is SERVER ONLY (Render Environment).
+const SB_URL=(process.env.SUPABASE_URL||'').replace(/\/$/,'');
+const SB_KEY=process.env.SUPABASE_SECRET_KEY||'';
+const SB_READY=SB_URL.startsWith('https://')&&SB_KEY.length>15;
+if(!SB_READY)console.error('SUPABASE_URL / SUPABASE_SECRET_KEY missing: account creation disabled to prevent data loss');
 function digestPassword(password,salt){return crypto.scryptSync(password,salt,64).toString('hex')}
-function verifyPassword(password,acc){const actual=Buffer.from(digestPassword(password,acc.salt),'hex'),expected=Buffer.from(acc.hash,'hex');return actual.length===expected.length&&crypto.timingSafeEqual(actual,expected)}
-function accountToken(){return crypto.randomBytes(32).toString('hex')}
-function loginAccount(p,nick,acc){if(p.nick)leave(p);p.nick=acc.nick;p.accountKey=nick;p.admin=false;p.token=accountToken();acc.sessions=acc.sessions||[];acc.sessions.push(crypto.createHash('sha256').update(p.token).digest('hex'));acc.sessions=acc.sessions.slice(-8);saveAccounts();send(p,{type:'authOK',nick:acc.nick,token:p.token})}
+function verifyPassword(password,stored){
+ const bits=String(stored||'').split(':');if(bits.length!==3||bits[0]!=='scrypt')return false;
+ try{const a=Buffer.from(digestPassword(password,bits[1]),'hex'),b=Buffer.from(bits[2],'hex');return a.length===b.length&&crypto.timingSafeEqual(a,b)}catch{return false}
+}
+async function sbRequest(method,endpoint,body){
+ if(!SB_READY)throw Error('База аккаунтов не подключена. Проверь настройки Render');
+ const response=await fetch(SB_URL+'/rest/v1/'+endpoint,{method,headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':'return=representation'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(8000)});
+ const raw=await response.text();let data;try{data=JSON.parse(raw)}catch{data=raw}
+ if(!response.ok){let e=new Error('Supabase '+response.status);e.status=response.status;e.code=data?.code;throw e}
+ return data;
+}
+async function getAccount(key){let rows=await sbRequest('GET','game_accounts?username_key=eq.'+encodeURIComponent(key)+'&select=id,username,password_hash&limit=1');return rows[0]||null}
+const TOKEN_KEY=crypto.createHash('sha256').update('uzc-account-token-v311:'+SB_KEY).digest();
+function makeToken(acc){const body=Buffer.from(JSON.stringify({id:acc.id,nick:acc.username,exp:Date.now()+90*86400000})).toString('base64url');const sig=crypto.createHmac('sha256',TOKEN_KEY).update(body).digest('base64url');return body+'.'+sig}
+function parseToken(token){if(typeof token!=='string'||token.length>2048)return null;const parts=token.split('.');if(parts.length!==2)return null;const signature=crypto.createHmac('sha256',TOKEN_KEY).update(parts[0]).digest('base64url');const a=Buffer.from(signature),b=Buffer.from(parts[1]);if(a.length!==b.length||!crypto.timingSafeEqual(a,b))return null;try{const obj=JSON.parse(Buffer.from(parts[0],'base64url').toString());return obj.exp>Date.now()&&typeof obj.id==='string'?obj:null}catch{return null}}
+function loginAccount(p,acc){if(p.nick)leave(p);p.nick=acc.username;p.accountKey=acc.id;p.admin=false;p.token=makeToken(acc);send(p,{type:'authOK',nick:acc.username,token:p.token})}
 
 const server=http.createServer((req,res)=>{let file=req.url.split('?')[0];file=file==='/'?'/index.html':file;if(file==='/solo.html'){res.writeHead(302,{Location:'/index.html'});return res.end()}let full=path.resolve(root,'.'+decodeURIComponent(file));if(!full.startsWith(root+path.sep)){res.writeHead(403);return res.end()}fs.readFile(full,(e,data)=>{if(e){res.writeHead(404);return res.end('Not found')}res.setHeader('Content-Type',full.endsWith('.html')?'text/html':full.endsWith('.js')?'application/javascript':'text/plain');res.end(data)})});
 const wss=new WebSocketServer({server});const players=new Map(),parties=new Map(),invites=new Map();let nextId=1;
@@ -107,30 +119,37 @@ for(let i=0;i<room.zombies.length;i++){let a=room.zombies[i],cx=Math.floor(a.x/c
 keepZombiesOutsidePlayers(room,members);
 for(let i=room.bombs.length-1;i>=0;i--){let b=room.bombs[i];b.t-=dt;if(b.t<=0){for(let p of members)if(p.hp>0&&p.zone===b.zone&&p.inv<=0&&Math.hypot(p.x-b.x,p.y-b.y)<b.r+12){p.hp=Math.max(0,p.hp-24);p.inv=.6}room.bombs.splice(i,1)}}if(room.remaining===0&&!room.zombies.length){if(room.nextWave<0){room.nextWave=5;members.forEach(p=>send(p,{type:'waveclear',wave:room.wave}))}else if((room.nextWave-=dt)<=0){room.wave++;startWave(room)}}if(members.every(p=>p.hp<=0)){room.running=false;members.forEach(p=>send(p,{type:'gameover',wave:room.wave}));partyState(room)}if(broadcast){const sharedZ=room.zombies.map(z=>({id:z.id,x:Math.round(z.x),y:Math.round(z.y),type:z.type,hp:Math.round(z.hp),max:z.max,r:z.r,zone:z.zone,chargeState:z.chargeState||0,chargeClock:z.chargeClock||0,chargeDX:z.chargeDX||0,chargeDY:z.chargeDY||0}));const sharedP=members.map(q=>({id:q.id,nick:q.nick,x:Math.round(q.x),y:Math.round(q.y),hp:q.hp,zone:q.zone,gun:q.gun,level:q.levels[q.gun],aim:q.aim,maxHp:q.maxHp||100}));room.ids.forEach(id=>{let p=players.get(id);if(p&&p.ws.bufferedAmount<180000)send(p,{type:'state',wave:room.wave,remaining:room.remaining,zombies:sharedZ,bombs:room.bombs,doors:room.doors,players:sharedP,cash:p.cash,kills:p.kills,ammo:p.ammo,gun:p.gun,levels:p.levels,owned:p.owned,hp:p.hp,maxHp:p.maxHp||100,streak:p.streak,streakTime:p.streakTime,perks:p.perks,nextWave:room.nextWave})})}}}
 setInterval(()=>tick(1/30),1000/30);
-wss.on('connection',ws=>{let p={id:nextId++,ws,nick:null,party:null};players.set(p.id,p);send(p,{type:'hello',id:p.id});ws.on('message',raw=>{if(raw.length>4000)return;let m;try{m=JSON.parse(raw)}catch{return}if(m.type==='adminLogin'){if(!p.nick)return fail(p,'Сначала войди под ником');if(p.adminFailures>=5)return fail(p,'Слишком много попыток входа');if(!validSecret(m.secret)){p.adminFailures=(p.adminFailures||0)+1;return fail(p,'Неверный админ-пароль или ADMIN_SECRET не задан на Render')}p.admin=true;p.adminFailures=0;send(p,{type:'adminOK'});return}
+wss.on('connection',ws=>{let p={id:nextId++,ws,nick:null,party:null};players.set(p.id,p);send(p,{type:'hello',id:p.id});ws.on('message',async raw=>{if(raw.length>4000)return;let m;try{m=JSON.parse(raw)}catch{return}if(m.type==='adminLogin'){if(!p.nick)return fail(p,'Сначала войди под ником');if(p.adminFailures>=5)return fail(p,'Слишком много попыток входа');if(!validSecret(m.secret)){p.adminFailures=(p.adminFailures||0)+1;return fail(p,'Неверный админ-пароль или ADMIN_SECRET не задан на Render')}p.admin=true;p.adminFailures=0;send(p,{type:'adminOK'});return}
 if(m.type==='adminCash'){if(!p.admin)return fail(p,'Нет прав администратора');const room=parties.get(p.party);if(!room?.running)return fail(p,'Сначала начни матч');const amount=Number(m.amount);if(!Number.isSafeInteger(amount)||amount<1||amount>100000)return fail(p,'Сумма: от 1 до 100 000');p.cash=Math.min(100000000,p.cash+amount);send(p,{type:'adminCashOK',cash:p.cash,amount});return}
 if(m.type==='authCreate'||m.type==='authLogin'||m.type==='authResume'){
- const nick=String(m.nick||'').trim(),key=nick.toLocaleLowerCase('und'),password=String(m.password||'');
- if(m.type==='authResume'){
-  const token=String(m.token||'');if(!/^[a-f0-9]{64}$/.test(token))return fail(p,'Сессия истекла, войди снова');
-  const hash=crypto.createHash('sha256').update(token).digest('hex');
-  const match=Object.entries(accounts).find(([,a])=>(a.sessions||[]).includes(hash));
-  if(!match)return fail(p,'Сессия не найдена, войди с паролем');
-  loginAccount(p,match[0],match[1]);return;
- }
- if(!/^[\p{L}\p{N}_-]{3,16}$/u.test(nick))return fail(p,'Ник: 3–16 букв, цифр, _ или -');
- if(password.length<8||password.length>128)return fail(p,'Пароль: от 8 до 128 символов');
- if(m.type==='authCreate'){
-  if(accounts[key])return fail(p,'Ник занят. Выбери другой');
-  const salt=crypto.randomBytes(16).toString('hex');accounts[key]={nick,salt,hash:digestPassword(password,salt),sessions:[]};
-  try{saveAccounts()}catch(e){delete accounts[key];return fail(p,'Ошибка сохранения аккаунта на сервере')}
- }else{
-  if(!accounts[key]||!verifyPassword(password,accounts[key]))return fail(p,'Неверный ник или пароль');
- }
- loginAccount(p,key,accounts[key]);return;
+ if(p.authBusy)return fail(p,'Подожди завершения входа');p.authBusy=true;
+ try{
+  if(!SB_READY)return fail(p,'База аккаунтов не подключена. Сообщи владельцу игры');
+  if(m.type==='authResume'){
+   const session=parseToken(m.token);if(!session)return fail(p,'Сессия истекла, войди снова');
+   const rows=await sbRequest('GET','game_accounts?id=eq.'+encodeURIComponent(session.id)+'&select=id,username,password_hash&limit=1');
+   if(!rows.length)return fail(p,'Аккаунт не найден, войди с паролем');
+   loginAccount(p,rows[0]);return;
+  }
+  const nick=String(m.nick||'').trim(),key=nick.toLowerCase(),password=String(m.password||'');
+  if(!/^[\p{L}\p{N}_-]{3,16}$/u.test(nick))return fail(p,'Ник: 3–16 букв, цифр, _ или -');
+  if(password.length<8||password.length>128)return fail(p,'Пароль: от 8 до 128 символов');
+  if(m.type==='authCreate'){
+   if(await getAccount(key))return fail(p,'Ник занят. Выбери другой');
+   const salt=crypto.randomBytes(16).toString('hex');
+   let created;
+   try{created=await sbRequest('POST','game_accounts?select=id,username,password_hash',{username:nick,password_hash:'scrypt:'+salt+':'+digestPassword(password,salt)})}
+   catch(e){if(e.code==='23505'||e.status===409)return fail(p,'Ник занят. Выбери другой');throw e}
+   loginAccount(p,created[0]);return;
+  }
+  const acc=await getAccount(key);
+  if(!acc||!verifyPassword(password,acc.password_hash))return fail(p,'Неверный ник или пароль');
+  loginAccount(p,acc);return;
+ }catch(e){console.error('Account auth error:',e.message);return fail(p,'Не удалось подключиться к базе аккаунтов. Попробуй позже')}
+ finally{p.authBusy=false}
 }
 if(m.type==='authLogout'){
- if(p.accountKey&&accounts[p.accountKey]){const a=accounts[p.accountKey];const hash=crypto.createHash('sha256').update(p.token||'').digest('hex');a.sessions=(a.sessions||[]).filter(x=>x!==hash);saveAccounts()}
+ // Browser discards its signed token; token expires after 90 days.
  leave(p);p.nick=null;p.accountKey=null;p.token=null;p.admin=false;send(p,{type:'authLoggedOut'});return;
 }
 if(!p.accountKey)return fail(p,'Сначала войди в аккаунт');if(m.type==='create'){leave(p);newParty(p)}if(m.type==='join'){let room=parties.get(String(m.code||'').toUpperCase());if(!room)return fail(p,'Комната не найдена');join(p,room)}if(m.type==='invite'){let target=[...players.values()].find(q=>q.nick?.toLowerCase()===String(m.nick||'').toLowerCase());if(!target)return fail(p,'Игрок не в сети');let room=parties.get(p.party);if(!room)return fail(p,'Сначала создай парти');invites.set(target.id,room.code);send(target,{type:'invite',from:p.nick,code:room.code});send(p,{type:'info',message:'Приглашение отправлено'})}if(m.type==='accept'){let code=invites.get(p.id);if(!code)return fail(p,'Приглашение истекло');let room=parties.get(code);if(!room)return fail(p,'Комната закрыта');invites.delete(p.id);join(p,room)}if(m.type==='leave'){leave(p);send(p,{type:'left'})}if(m.type==='start'){let room=parties.get(p.party);if(!room||room.host!==p.id)return fail(p,'Только лидер запускает матч');if(room.running)return;begin(room)}if(m.type==='input'){p.moveX=Math.max(-1,Math.min(1,Number(m.x)||0));p.moveY=Math.max(-1,Math.min(1,Number(m.y)||0));p.aim=Number(m.aim)||0;p.fire=!!m.fire}if(m.type==='door'){
