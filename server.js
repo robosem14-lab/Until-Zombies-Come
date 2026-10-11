@@ -19,14 +19,43 @@ async function sbRequest(method,endpoint,body){
  if(!response.ok){let e=new Error('Supabase '+response.status);e.status=response.status;e.code=data?.code;throw e}
  return data;
 }
-async function getAccount(key){let rows=await sbRequest('GET','game_accounts?username_key=eq.'+encodeURIComponent(key)+'&select=id,username,password_hash&limit=1');return rows[0]||null}
+async function getAccount(key){let rows=await sbRequest('GET','game_accounts?username_key=eq.'+encodeURIComponent(key)+'&select=id,username,password_hash,created_at&limit=1');return rows[0]||null}
+
+const PROFILE_FIELDS='account_id,display_name,region,language,nick_color,icon,frame,best_wave,total_kills,unlocked';
+function publicId(uuid){const hex=crypto.createHash('sha256').update(uuid).digest('hex');return '#00'+String(parseInt(hex.slice(0,9),16)%10000).padStart(4,'0')}
+const ICON_RULES={star:100,skull:1000,crown:10000,bolt:0,shield:0,flame:0};
+const FRAME_RULES={bronze:100,silver:1000,gold:10000,particle:0,perks:0,hunter:0};
+async function loadProfile(p){
+ let rows=await sbRequest('GET','game_profiles?account_id=eq.'+encodeURIComponent(p.accountKey)+'&select='+PROFILE_FIELDS+'&limit=1');
+ if(!rows.length){rows=await sbRequest('POST','game_profiles?select='+PROFILE_FIELDS,{account_id:p.accountKey,display_name:p.nick});}
+ return rows[0];
+}
+function profileOut(p,profile,created){return {type:'profileData',username:p.nick,publicId:publicId(p.accountKey),created_at:created||null,...profile}}
+async function updateProfile(p,m){
+ let old=await loadProfile(p);let change={};
+ if(m.display_name!==undefined){let d=String(m.display_name).trim();if(d.length<2||d.length>20||/[<>\x00-\x1f]/.test(d))return fail(p,'Display Name: 2–20 символов');change.display_name=d;}
+ if(m.region!==undefined){let r=String(m.region);if(!['Europe','Asia','North America','South America','Africa','Oceania','Other'].includes(r))return fail(p,'Недопустимый регион');change.region=r;}
+ if(m.language!==undefined){if(!['ru','fi','en','es','fr'].includes(m.language))return fail(p,'Недопустимый язык');change.language=m.language;}
+ if(m.nick_color!==undefined){if(!/^#[0-9a-fA-F]{6}$/.test(m.nick_color))return fail(p,'Неверный цвет');change.nick_color=m.nick_color;}
+ if(m.icon!==undefined){let icon=String(m.icon);if(!Object.hasOwn(ICON_RULES,icon))return fail(p,'Иконка недоступна');if(icon!=='bolt'&&old.total_kills<ICON_RULES[icon])return fail(p,'Иконка ещё закрыта');change.icon=icon;}
+ if(m.frame!==undefined){let frame=String(m.frame);if(!Object.hasOwn(FRAME_RULES,frame))return fail(p,'Рамка недоступна');if(frame!=='bronze'&&old.total_kills<FRAME_RULES[frame]&&!old.unlocked?.includes(frame))return fail(p,'Рамка ещё закрыта');if(frame==='bronze'&&old.total_kills<100)return fail(p,'Нужно 100 убийств');change.frame=frame;}
+ if(Object.keys(change).length){await sbRequest('PATCH','game_profiles?account_id=eq.'+encodeURIComponent(p.accountKey)+'&select='+PROFILE_FIELDS,change);}
+ send(p,profileOut(p,await loadProfile(p),p.createdAt));
+}
+async function recordProfile(p,info){
+ if(!p.accountKey)return;
+ const old=await loadProfile(p),best=Math.max(old.best_wave||0,Math.min(10000,Math.floor(Number(info.wave)||0))),kills=Math.max(old.total_kills||0,Math.min(100000000,Math.floor(Number(info.kills)||0)));
+ let unlock=new Set(old.unlocked||[]);if(info.maxParticle)unlock.add('particle');if(info.allPerks)unlock.add('perks');if(info.allZombies)unlock.add('hunter');
+ await sbRequest('PATCH','game_profiles?account_id=eq.'+encodeURIComponent(p.accountKey)+'&select='+PROFILE_FIELDS,{best_wave:best,total_kills:kills,unlocked:[...unlock]});
+}
+
 const TOKEN_KEY=crypto.createHash('sha256').update('uzc-account-token-v311:'+SB_KEY).digest();
 function makeToken(acc){const body=Buffer.from(JSON.stringify({id:acc.id,nick:acc.username,exp:Date.now()+90*86400000})).toString('base64url');const sig=crypto.createHmac('sha256',TOKEN_KEY).update(body).digest('base64url');return body+'.'+sig}
 function parseToken(token){if(typeof token!=='string'||token.length>2048)return null;const parts=token.split('.');if(parts.length!==2)return null;const signature=crypto.createHmac('sha256',TOKEN_KEY).update(parts[0]).digest('base64url');const a=Buffer.from(signature),b=Buffer.from(parts[1]);if(a.length!==b.length||!crypto.timingSafeEqual(a,b))return null;try{const obj=JSON.parse(Buffer.from(parts[0],'base64url').toString());return obj.exp>Date.now()&&typeof obj.id==='string'?obj:null}catch{return null}}
 const ADMIN_NAMES=new Set(['ogurchiksem5','pro666_kirill666']);
 function isGameAdmin(p){return !!p.accountKey&&ADMIN_NAMES.has(String(p.nick||'').toLowerCase())}
 function adminRoom(p){let r=parties.get(p.party);return r?.running?r:null}
-function loginAccount(p,acc){if(p.nick)leave(p);p.nick=acc.username;p.accountKey=acc.id;p.admin=isGameAdmin(p);p.token=makeToken(acc);send(p,{type:'authOK',nick:acc.username,token:p.token,gameAdmin:p.admin})}
+function loginAccount(p,acc){p.createdAt=acc.created_at||null;if(p.nick)leave(p);p.nick=acc.username;p.accountKey=acc.id;p.admin=isGameAdmin(p);p.token=makeToken(acc);send(p,{type:'authOK',nick:acc.username,token:p.token,gameAdmin:p.admin});loadProfile(p).then(profile=>send(p,profileOut(p,profile,p.createdAt))).catch(e=>console.error('Profile:',e.message))}
 
 const server=http.createServer((req,res)=>{let file=req.url.split('?')[0];file=file==='/'?'/index.html':file;if(file==='/solo.html'){res.writeHead(302,{Location:'/index.html'});return res.end()}let full=path.resolve(root,'.'+decodeURIComponent(file));if(!full.startsWith(root+path.sep)){res.writeHead(403);return res.end()}fs.readFile(full,(e,data)=>{if(e){res.writeHead(404);return res.end('Not found')}res.setHeader('Content-Type',full.endsWith('.html')?'text/html':full.endsWith('.js')?'application/javascript':'text/plain');res.end(data)})});
 const wss=new WebSocketServer({server});const players=new Map(),parties=new Map(),invites=new Map();let nextId=1;
@@ -180,7 +209,7 @@ if(m.type==='authCreate'||m.type==='authLogin'||m.type==='authResume'){
   if(!SB_READY)return fail(p,'База аккаунтов не подключена. Сообщи владельцу игры');
   if(m.type==='authResume'){
    const session=parseToken(m.token);if(!session)return fail(p,'Сессия истекла, войди снова');
-   const rows=await sbRequest('GET','game_accounts?id=eq.'+encodeURIComponent(session.id)+'&select=id,username,password_hash&limit=1');
+   const rows=await sbRequest('GET','game_accounts?id=eq.'+encodeURIComponent(session.id)+'&select=id,username,password_hash,created_at&limit=1');
    if(!rows.length)return fail(p,'Аккаунт не найден, войди с паролем');
    loginAccount(p,rows[0]);return;
   }
@@ -191,7 +220,7 @@ if(m.type==='authCreate'||m.type==='authLogin'||m.type==='authResume'){
    if(await getAccount(key))return fail(p,'Ник занят. Выбери другой');
    const salt=crypto.randomBytes(16).toString('hex');
    let created;
-   try{created=await sbRequest('POST','game_accounts?select=id,username,password_hash',{username:nick,password_hash:'scrypt:'+salt+':'+digestPassword(password,salt)})}
+   try{created=await sbRequest('POST','game_accounts?select=id,username,password_hash,created_at',{username:nick,password_hash:'scrypt:'+salt+':'+digestPassword(password,salt)})}
    catch(e){if(e.code==='23505'||e.status===409)return fail(p,'Ник занят. Выбери другой');throw e}
    loginAccount(p,created[0]);return;
   }
@@ -205,7 +234,11 @@ if(m.type==='authLogout'){
  // Browser discards its signed token; token expires after 90 days.
  leave(p);p.nick=null;p.accountKey=null;p.token=null;p.admin=false;send(p,{type:'authLoggedOut'});return;
 }
-if(!p.accountKey)return fail(p,'Сначала войди в аккаунт');if(m.type==='create'){leave(p);newParty(p)}if(m.type==='join'){let room=parties.get(String(m.code||'').toUpperCase());if(!room)return fail(p,'Комната не найдена');join(p,room)}if(m.type==='invite'){let target=[...players.values()].find(q=>q.nick?.toLowerCase()===String(m.nick||'').toLowerCase());if(!target)return fail(p,'Игрок не в сети');let room=parties.get(p.party);if(!room)return fail(p,'Сначала создай парти');invites.set(target.id,room.code);send(target,{type:'invite',from:p.nick,code:room.code});send(p,{type:'info',message:'Приглашение отправлено'})}if(m.type==='accept'){let code=invites.get(p.id);if(!code)return fail(p,'Приглашение истекло');let room=parties.get(code);if(!room)return fail(p,'Комната закрыта');invites.delete(p.id);join(p,room)}if(m.type==='leave'){leave(p);send(p,{type:'left'})}if(m.type==='start'){let room=parties.get(p.party);if(!room||room.host!==p.id)return fail(p,'Только лидер запускает матч');if(room.running)return;begin(room)}if(m.type==='input'){p.moveX=Math.max(-1,Math.min(1,Number(m.x)||0));p.moveY=Math.max(-1,Math.min(1,Number(m.y)||0));p.aim=Number(m.aim)||0;p.fire=!!m.fire}if(m.type==='portal'){
+if(!p.accountKey)return fail(p,'Сначала войди в аккаунт');if(m.type==='profileGet'){try{send(p,profileOut(p,await loadProfile(p),p.createdAt))}catch(e){console.error('Profile:',e.message);fail(p,'Профиль временно недоступен')}return;}
+if(m.type==='profileUpdate'){try{await updateProfile(p,m)}catch(e){console.error('Profile:',e.message);fail(p,'Не удалось сохранить профиль')}return;}
+if(m.type==='profileRecord'){try{await recordProfile(p,m)}catch(e){console.error('Profile:',e.message)}return;}
+if(m.type==='profilePassword'){const old=String(m.oldPassword||''),fresh=String(m.newPassword||'');if(fresh.length<8||fresh.length>128)return fail(p,'Новый пароль: 8–128 символов');try{const a=await sbRequest('GET','game_accounts?id=eq.'+encodeURIComponent(p.accountKey)+'&select=password_hash');if(!a[0]||!verifyPassword(old,a[0].password_hash))return fail(p,'Неверный текущий пароль');const salt=crypto.randomBytes(16).toString('hex');await sbRequest('PATCH','game_accounts?id=eq.'+encodeURIComponent(p.accountKey),{password_hash:'scrypt:'+salt+':'+digestPassword(fresh,salt)});send(p,{type:'profilePasswordOK'});}catch(e){console.error('Password update:',e.message);fail(p,'Не удалось сменить пароль')}return;}
+if(m.type==='create'){leave(p);newParty(p)}if(m.type==='join'){let room=parties.get(String(m.code||'').toUpperCase());if(!room)return fail(p,'Комната не найдена');join(p,room)}if(m.type==='invite'){let target=[...players.values()].find(q=>q.nick?.toLowerCase()===String(m.nick||'').toLowerCase());if(!target)return fail(p,'Игрок не в сети');let room=parties.get(p.party);if(!room)return fail(p,'Сначала создай парти');invites.set(target.id,room.code);send(target,{type:'invite',from:p.nick,code:room.code});send(p,{type:'info',message:'Приглашение отправлено'})}if(m.type==='accept'){let code=invites.get(p.id);if(!code)return fail(p,'Приглашение истекло');let room=parties.get(code);if(!room)return fail(p,'Комната закрыта');invites.delete(p.id);join(p,room)}if(m.type==='leave'){leave(p);send(p,{type:'left'})}if(m.type==='start'){let room=parties.get(p.party);if(!room||room.host!==p.id)return fail(p,'Только лидер запускает матч');if(room.running)return;begin(room)}if(m.type==='input'){p.moveX=Math.max(-1,Math.min(1,Number(m.x)||0));p.moveY=Math.max(-1,Math.min(1,Number(m.y)||0));p.aim=Number(m.aim)||0;p.fire=!!m.fire}if(m.type==='portal'){
  const room=parties.get(p.party);if(!room?.running||p.hp<=0||p.portalCooldown>0)return;
  if(p.x<270||p.x>490)return fail(p,'Подойди к центру двери');
  let destination=null;
